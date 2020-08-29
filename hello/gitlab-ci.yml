@@ -1,0 +1,85 @@
+image: python:3.6
+
+services:
+  - redis:3.2
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  untracked: true
+  key: "test"
+  paths:
+    - .cache/pip
+    - venv/
+
+before_script:
+  - python --version
+  - pip install virtualenv
+  - virtualenv venv
+  #need to added to the test env only but i kept them here for now
+  - pip install flake8
+  - pip install radon
+  - pip install bandit
+  - source venv/bin/activate
+  - pip install -r requirements.txt
+
+stages:
+  
+   - codesanity
+   - cyclomaticcomplexity
+   - vulnerability
+   - test
+   - deploy
+
+codesanity:
+  stage: codesanity
+  artifacts:
+    paths:
+      - .cache/pip
+      - venv
+  script:
+    - flake8 --exclude='.git,venv,*migrations*,static/lib' .
+
+cyclomaticcomplexity:
+  stage: cyclomaticcomplexity
+  artifacts:
+    paths:
+      - .cache/pip
+      - venv
+  script:
+    - radon cc -s -a --ignore='venv' .
+    - radon mi -s --ignore='venv' .
+
+vulnerability:
+  stage: vulnerability
+  artifacts:
+    paths:
+      - .cache/pip
+      - venv
+  script:
+    - bandit -x "./tests/*,./venv/*" -r .
+
+test:
+  stage: test
+  variables:
+    DISPLAY: ":99"
+  artifacts:
+    paths:
+      - .cache/pip
+      - venv/
+  script:
+    - pip install pytest --quiet
+    - pytest tests
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+
+deploy:
+  stage: deploy
+  script:
+    - apt-get update -qy
+    - apt-get install -y ruby-dev
+    - gem install dpl
+    - dpl --provider=heroku --app=gitlab-ci-python-test-staging --api-key=$HEROKU_STAGING_API_KEY
+  only:
+    - master
+
